@@ -1,1 +1,1 @@
-web: sh siga_backend/start_railway.sh
+web: sh start.sh
