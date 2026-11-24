@@ -16,6 +16,7 @@ echo "📡 Puerto principal: $PORT"
 : "${CACHE_ENABLED:=False}"
 : "${MODULES_AUTO_DISCOVER:=True}"
 : "${MODULES_VALIDATE_ON_START:=True}"
+
 export ENVIRONMENT DEBUG ENABLE_NATS CACHE_ENABLED MODULES_AUTO_DISCOVER MODULES_VALIDATE_ON_START
 
 if [ "$ENVIRONMENT" = "production" ]; then
@@ -27,13 +28,17 @@ fi
 
 if [ -n "$DATABASE_URL" ]; then
     echo "📦 DATABASE_URL detectada de Railway."
-    case "$DATABASE_URL" in
-        *sslmode=*) ;;
-        *\?*) DATABASE_URL="${DATABASE_URL}&sslmode=require" ;;
-        *) DATABASE_URL="${DATABASE_URL}?sslmode=require" ;;
-    esac
+
+    # Se conserva la DATABASE_URL original de Railway.
+    # No se agrega sslmode=require porque el backend utiliza asyncpg.
     export DATABASE_URL
-    DB_URL=$(printf '%s' "$DATABASE_URL" | sed -e 's/^postgresql+asyncpg:\/\//postgresql+psycopg:\/\//' -e 's/^postgresql:\/\//postgresql+psycopg:\/\//')
+
+    # Para las partes del backend que utilizan psycopg,
+    # normalizamos el esquema de PostgreSQL.
+    DB_URL=$(printf '%s' "$DATABASE_URL" | sed \
+        -e 's/^postgresql+asyncpg:\/\//postgresql+psycopg:\/\//' \
+        -e 's/^postgresql:\/\//postgresql+psycopg:\/\//')
+
     export DB_URL
 else
     echo "ADVERTENCIA: DATABASE_URL no definida; se usaran las variables DB_*."
@@ -44,16 +49,20 @@ cleanup() {
     trap - EXIT INT TERM
     kill 0 2>/dev/null || true
 }
+
 trap cleanup EXIT INT TERM
 
 if [ "$SKIP_MIGRATIONS" != "true" ]; then
     echo "🔄 Ejecutando migraciones de base de datos..."
+
     attempt=1
+
     until alembic -c alembic.ini upgrade head; do
         if [ "$attempt" -ge 5 ]; then
             echo "ERROR: las migraciones fallaron tras $attempt intentos; abortando arranque." >&2
             exit 1
         fi
+
         attempt=$((attempt + 1))
         echo "Reintentando migraciones en 5s ($attempt/5)..."
         sleep 5
@@ -69,6 +78,7 @@ export SIGA_MODULE_EVALUACION_URL="http://127.0.0.1:8008"
 export SIGA_MODULE_ADMISION_URL="http://127.0.0.1:8009"
 
 echo "⚙️ Levantando 7 microservicios internos..."
+
 python -m uvicorn main:app --host 127.0.0.1 --port 8001 --app-dir modules/mod-usuarios &
 python -m uvicorn main:app --host 127.0.0.1 --port 8002 --app-dir modules/mod-planes-estudio &
 python -m uvicorn main:app --host 127.0.0.1 --port 8005 --app-dir modules/mod-programas-estudio &
@@ -78,6 +88,7 @@ python -m uvicorn main:app --host 127.0.0.1 --port 8008 --app-dir modules/mod-ev
 python -m uvicorn main:app --host 127.0.0.1 --port 8009 --app-dir modules/mod-admision &
 
 echo "Esperando health checks de microservicios..."
+
 python - <<'PY'
 import time
 import urllib.request
@@ -87,11 +98,16 @@ deadline = time.time() + 90
 
 while True:
     pending = []
+
     for port in PORTS:
         try:
-            with urllib.request.urlopen(f"http://127.0.0.1:{port}/health", timeout=2) as response:
+            with urllib.request.urlopen(
+                f"http://127.0.0.1:{port}/health",
+                timeout=2
+            ) as response:
                 if response.status != 200:
                     pending.append(port)
+
         except Exception:
             pending.append(port)
 
@@ -100,12 +116,17 @@ while True:
         break
 
     if time.time() >= deadline:
-        raise SystemExit(f"ERROR: microservicios sin responder: {pending}")
+        raise SystemExit(
+            f"ERROR: microservicios sin responder: {pending}"
+        )
 
     time.sleep(2)
 PY
 
 echo "🌐 Iniciando Core Gateway en 0.0.0.0:$PORT..."
+
 python -m uvicorn app.main:app --host 0.0.0.0 --port "$PORT" &
+
 core_pid=$!
+
 wait "$core_pid"
