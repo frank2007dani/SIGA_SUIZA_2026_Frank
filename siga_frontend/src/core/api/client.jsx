@@ -1,4 +1,10 @@
-export const API_BASE = import.meta.env.VITE_API_URL || '';
+const PRODUCTION_API_URL = 'https://web-production-715f6b3f.up.railway.app';
+
+const normalizeBaseUrl = (value) => String(value || '').replace(/\/+$/, '');
+
+export const API_BASE = normalizeBaseUrl(
+  import.meta.env.VITE_API_URL || (import.meta.env.PROD ? PRODUCTION_API_URL : '')
+);
 export const WS_BASE = import.meta.env.VITE_WS_URL || `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}`;
 
 class SIGAApiClient {
@@ -25,11 +31,11 @@ class SIGAApiClient {
       ? setTimeout(() => controller.abort(), timeoutMs)
       : null;
     const config = {
+      ...fetchOptions,
       headers: {
         'Content-Type': 'application/json',
         ...fetchOptions.headers,
       },
-      ...fetchOptions,
       ...(controller && !fetchOptions.signal ? { signal: controller.signal } : {}),
     };
 
