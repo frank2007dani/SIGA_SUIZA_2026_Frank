@@ -1,4 +1,4 @@
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+﻿from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker, declarative_base  # 👈 AGREGAR declarative_base aquí
 from sqlalchemy import MetaData
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
@@ -30,7 +30,7 @@ def _normalizar_database_url_asyncpg(database_url: str):
     host = (parsed.hostname or settings.DB_HOST or "").lower()
     connect_args = {}
     if host not in _SSL_EXEMPT_HOSTS and sslmode != "disable":
-        connect_args["ssl"] = True
+        connect_args["ssl"] = "require"
     return clean_url, connect_args
 
 
