@@ -7,19 +7,28 @@ from database import init_db
 import asyncio
 from outbox_worker import outbox_worker
 
-app = FastAPI(title="SIGA - Gestión Académica", version="2.0.0")
+app = FastAPI(
+    title="SIGA - Gestión Académica",
+    version="2.0.0"
+)
 
 app.include_router(router)
 app.include_router(matricula_router)
 app.include_router(tesoreria_router)
 
+
 @app.get("/")
 async def root():
     return {"message": "API Gestión Académica Operativa"}
 
+
 @app.get("/health")
 async def health():
-    return {"status": "healthy", "module": "mod-gestion-academica"}
+    return {
+        "status": "healthy",
+        "module": "mod-gestion-academica"
+    }
+
 
 @app.get("/manifest")
 async def get_manifest():
@@ -28,17 +37,33 @@ async def get_manifest():
         "name": "mod-gestion-academica",
         "version": "2.0.0",
         "api_version": "v1",
-        "endpoints": {"http": f"http://localhost:{port}"},
+        "endpoints": {
+            "http": f"http://localhost:{port}"
+        },
         "health_check": "/health"
     }
+
 
 @app.on_event("startup")
 async def startup():
     await init_db()
     await asegurar_esquema_tesoreria()
-    asyncio.create_task(outbox_worker())
+
+    # Iniciar Outbox Worker solamente si NATS esta habilitado
+    if os.getenv("ENABLE_NATS", "false").lower() == "true":
+        asyncio.create_task(outbox_worker())
+        print("Outbox Worker NATS iniciado")
+    else:
+        print("NATS desactivado; Outbox Worker no iniciado")
+
 
 if __name__ == "__main__":
     import uvicorn
+
     port = int(os.getenv("PORT", 8006))
-    uvicorn.run(app, host="0.0.0.0", port=port)
+
+    uvicorn.run(
+        app,
+        host="0.0.0.0",
+        port=port
+    )

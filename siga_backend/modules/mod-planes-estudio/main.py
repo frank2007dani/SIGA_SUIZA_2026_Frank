@@ -39,11 +39,23 @@ async def get_manifest():
 @app.on_event("startup")
 async def startup():
     await init_db()
-    asyncio.create_task(outbox_worker())
+
+    # Iniciar Outbox Worker solamente si NATS esta habilitado
+    if os.getenv("ENABLE_NATS", "false").lower() == "true":
+        asyncio.create_task(outbox_worker())
+        print("Outbox Worker NATS iniciado")
+    else:
+        print("NATS desactivado; Outbox Worker no iniciado")
+
     print("Modulo de Planes de Estudio iniciado")
 
 
 if __name__ == "__main__":
     import uvicorn
     port = int(os.getenv("PORT", 8002))
-    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=True)
+    uvicorn.run(
+        "main:app",
+        host="0.0.0.0",
+        port=port,
+        reload=True
+    )

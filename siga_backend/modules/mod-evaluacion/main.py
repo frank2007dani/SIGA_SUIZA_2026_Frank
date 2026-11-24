@@ -3,7 +3,8 @@ import os
 import sys
 from pathlib import Path
 
-# Asegurar que la raíz del backend (/app o siga_backend) esté en sys.path para imports compartidos
+# Asegurar que la raíz del backend (/app o siga_backend) esté en sys.path
+# para imports compartidos
 _app_root = str(Path(__file__).resolve().parent.parent.parent)
 if _app_root not in sys.path:
     sys.path.insert(0, _app_root)
@@ -13,17 +14,26 @@ from database import init_db
 import asyncio
 from outbox_worker import outbox_worker
 
-app = FastAPI(title="SIGA - Evaluación", version="1.0.0")
+app = FastAPI(
+    title="SIGA - Evaluación",
+    version="1.0.0"
+)
 
 app.include_router(router)
+
 
 @app.get("/")
 async def root():
     return {"message": "API Evaluación Operativa"}
 
+
 @app.get("/health")
 async def health():
-    return {"status": "healthy", "module": "mod-evaluacion"}
+    return {
+        "status": "healthy",
+        "module": "mod-evaluacion"
+    }
+
 
 @app.get("/manifest")
 async def get_manifest():
@@ -32,16 +42,32 @@ async def get_manifest():
         "name": "mod-evaluacion",
         "version": "1.0.0",
         "api_version": "v1",
-        "endpoints": {"http": f"http://mod-evaluacion:{port}"},
+        "endpoints": {
+            "http": f"http://mod-evaluacion:{port}"
+        },
         "health_check": "/health"
     }
+
 
 @app.on_event("startup")
 async def startup():
     await init_db()
-    asyncio.create_task(outbox_worker())
+
+    # Iniciar Outbox Worker solamente si NATS esta habilitado
+    if os.getenv("ENABLE_NATS", "false").lower() == "true":
+        asyncio.create_task(outbox_worker())
+        print("Outbox Worker NATS iniciado")
+    else:
+        print("NATS desactivado; Outbox Worker no iniciado")
+
 
 if __name__ == "__main__":
     import uvicorn
+
     port = int(os.getenv("PORT", 8008))
-    uvicorn.run(app, host="0.0.0.0", port=port)
+
+    uvicorn.run(
+        app,
+        host="0.0.0.0",
+        port=port
+    )

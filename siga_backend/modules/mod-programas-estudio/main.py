@@ -51,13 +51,30 @@ async def startup():
             await init_db()
             break
         except Exception as e:
-            print(f"Intento {attempt + 1}/5 fallido al conectar con BD: {e}. Reintentando en 2s...")
+            print(
+                f"Intento {attempt + 1}/5 fallido al conectar con BD: "
+                f"{e}. Reintentando en 2s..."
+            )
             await asyncio.sleep(2)
-    asyncio.create_task(outbox_worker())
+
+    # Iniciar Outbox Worker solamente si NATS esta habilitado
+    if os.getenv("ENABLE_NATS", "false").lower() == "true":
+        asyncio.create_task(outbox_worker())
+        print("Outbox Worker NATS iniciado")
+    else:
+        print("NATS desactivado; Outbox Worker no iniciado")
+
     print("Modulo de Programas de Estudio iniciado")
 
 
 if __name__ == "__main__":
     import uvicorn
+
     port = int(os.getenv("PORT", 8005))
-    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=True)
+
+    uvicorn.run(
+        "main:app",
+        host="0.0.0.0",
+        port=port,
+        reload=True
+    )

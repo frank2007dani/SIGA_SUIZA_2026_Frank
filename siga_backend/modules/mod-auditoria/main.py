@@ -2,8 +2,12 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from routes import router
 import asyncio
+import os
 
-app = FastAPI(title="mod-auditoria", version="1.0.0")
+app = FastAPI(
+    title="mod-auditoria",
+    version="1.0.0"
+)
 
 app.add_middleware(
     CORSMiddleware,
@@ -15,16 +19,35 @@ app.add_middleware(
 
 app.include_router(router)
 
+
 @app.get("/health")
 def health_check():
-    return {"status": "healthy", "module": "mod-auditoria"}
+    return {
+        "status": "healthy",
+        "module": "mod-auditoria"
+    }
+
 
 @app.on_event("startup")
 async def startup_event():
-    import event_listener
-    # Lanzar el listener de auditoría en background
-    asyncio.create_task(event_listener.start_listener())
+
+    # Iniciar listener de auditoría solamente si NATS está habilitado
+    if os.getenv("ENABLE_NATS", "false").lower() == "true":
+        import event_listener
+
+        # Lanzar el listener de auditoría en background
+        asyncio.create_task(event_listener.start_listener())
+
+        print("Event Listener de Auditoría NATS iniciado")
+    else:
+        print("NATS desactivado; Event Listener de Auditoría no iniciado")
+
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8007)
+
+    uvicorn.run(
+        app,
+        host="0.0.0.0",
+        port=8007
+    )
