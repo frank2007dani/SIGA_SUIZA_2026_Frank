@@ -5,7 +5,26 @@ const normalizeBaseUrl = (value) => String(value || '').replace(/\/+$/, '');
 export const API_BASE = normalizeBaseUrl(
   import.meta.env.VITE_API_URL || (import.meta.env.PROD ? PRODUCTION_API_URL : '')
 );
-export const WS_BASE = import.meta.env.VITE_WS_URL || `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}`;
+const normalizeWebSocketBase = (value) => normalizeBaseUrl(value).replace(/\/ws$/, '');
+
+const toWebSocketBase = (url) => {
+  try {
+    const parsed = new URL(url);
+    parsed.protocol = parsed.protocol === 'https:' ? 'wss:' : 'ws:';
+    parsed.pathname = '';
+    parsed.search = '';
+    parsed.hash = '';
+    return normalizeBaseUrl(parsed.toString());
+  } catch {
+    return '';
+  }
+};
+
+export const WS_BASE = import.meta.env.VITE_WS_URL
+  ? normalizeWebSocketBase(import.meta.env.VITE_WS_URL)
+  : (import.meta.env.PROD
+    ? toWebSocketBase(API_BASE)
+    : `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}`);
 
 class SIGAApiClient {
   constructor() {
