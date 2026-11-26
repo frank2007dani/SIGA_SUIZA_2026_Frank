@@ -8,6 +8,7 @@ const derivedWs = apiBase
 
 export const API_BASE = apiBase;
 export const WS_BASE = configuredWs || derivedWs;
+const AUTH_API_BASE = API_BASE || 'https://siga-backend-pog5.onrender.com';
 
 class SIGAApiClient {
   constructor() {
@@ -26,7 +27,7 @@ class SIGAApiClient {
   }
 
   async request(endpoint, options = {}) {
-    const url = `${this.baseURL}${endpoint}`;
+    const url = /^https?:\/\//.test(endpoint) ? endpoint : `${this.baseURL}${endpoint}`;
     const { timeoutMs, ...fetchOptions } = options;
     const controller = timeoutMs ? new AbortController() : null;
     const timeoutId = controller
@@ -49,7 +50,7 @@ class SIGAApiClient {
       const response = await fetch(url, config);
 
       if (response.status === 401) {
-        if (endpoint.startsWith('/auth/login')) {
+        if (endpoint.includes('/auth/login')) {
           let errorMsg = 'Credenciales inválidas';
           try {
             const errorData = await response.json();
@@ -84,7 +85,7 @@ class SIGAApiClient {
 
   // Auth endpoints
   async login(email, password) {
-    return this.request(`/auth/login?email=${encodeURIComponent(email)}&password=${encodeURIComponent(password)}`, {
+    return this.request(`${AUTH_API_BASE}/auth/login?email=${encodeURIComponent(email)}&password=${encodeURIComponent(password)}`, {
       method: 'POST'
     });
   }
