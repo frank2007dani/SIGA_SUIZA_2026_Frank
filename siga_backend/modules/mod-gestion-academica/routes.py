@@ -233,9 +233,8 @@ async def obtener_estudiantes(programa_id: Optional[int] = None, db: AsyncSessio
             for r in rows
         ]
     except Exception as e:
-        tb = traceback.format_exc()
-        print(f"[ERROR] obtener_estudiantes: {e}\n{tb}")
-        return {"error": str(e), "type": type(e).__name__, "traceback": tb}
+        print(f"[ERROR] obtener_estudiantes: {e}\n{traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail="No se pudo obtener la lista de estudiantes")
 
 @router.get("/estudiantes/siguiente-codigo")
 async def obtener_siguiente_codigo(db: AsyncSession = Depends(get_db)):
