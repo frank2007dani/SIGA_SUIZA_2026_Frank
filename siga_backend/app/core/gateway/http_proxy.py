@@ -10,6 +10,7 @@ from urllib.parse import urljoin, urlsplit
 from ..registry.runtime import module_runtime
 from ..identity.tokens import token_service
 from ..config import settings
+from .. import inprocess as inprocess_modules
 
 # Importar componentes de resiliencia
 try:
@@ -38,14 +39,19 @@ class HTTPGateway:
 
     def __init__(self):
         self.timeout = settings.http_proxy_timeout
-        self._client: Optional[httpx.AsyncClient] = None
+        self._clients: Dict[str, httpx.AsyncClient] = {}
         self.resilience_enabled = getattr(settings, 'fallback_enabled', True) and RESILIENCE_AVAILABLE
     
-    async def get_client(self) -> httpx.AsyncClient:
+    async def get_client(self, module_name: Optional[str] = None) -> httpx.AsyncClient:
         """Obtiene cliente HTTP reutilizable"""
-        if self._client is None:
-            self._client = httpx.AsyncClient(timeout=self.timeout)
-        return self._client
+        key = module_name or "default"
+        if key not in self._clients:
+            transport = inprocess_modules.get_transport(module_name) if module_name else None
+            if transport is None:
+                self._clients[key] = httpx.AsyncClient(timeout=self.timeout)
+            else:
+                self._clients[key] = httpx.AsyncClient(timeout=self.timeout, transport=transport)
+        return self._clients[key]
     
     async def proxy_to_module(self, request: Request, module_name: str, path: str, user: Dict[str, Any] = None) -> Response:
         """Proxy inteligente que redirige a módulos externos con resiliencia"""
@@ -69,7 +75,7 @@ class HTTPGateway:
         headers = self._prepare_forward_headers(request, module_name, user)
         
         try:
-            client = await self.get_client()
+            client = await self.get_client(module_name)
             
             # Request wrapped inside Circuit Breaker
             if self.resilience_enabled and circuit_breaker_manager:
@@ -348,9 +354,9 @@ class HTTPGateway:
     
     async def close(self):
         """Cierra el cliente HTTP"""
-        if self._client:
-            await self._client.aclose()
-            self._client = None
+        for client in self._clients.values():
+            await client.aclose()
+        self._clients.clear()
 
 # Instancia global del gateway
 http_gateway = HTTPGateway()

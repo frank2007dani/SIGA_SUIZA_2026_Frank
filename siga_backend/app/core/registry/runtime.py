@@ -11,6 +11,7 @@ import yaml
 from .schemas import ModuleStatus
 from .validator import manifest_validator
 from ..config import settings
+from .. import inprocess as inprocess_modules
 from ..gateway.event_bus import event_bus, EventFactory
 from ..gateway.event_schemas import EventType
 from sqlalchemy.future import select
@@ -71,17 +72,22 @@ class ModuleInfo:
     async def check_health(self) -> bool:
         """Realiza health check al módulo"""
         try:
-            async with httpx.AsyncClient() as client:
-                response = await client.get(
-                    f"{self.endpoints['http']}{self.health_check}",
-                    timeout=10.0
-                )
-                
-                is_healthy = response.status_code == 200
-                self.status = ModuleStatus.HEALTHY if is_healthy else ModuleStatus.UNHEALTHY
-                self.last_health_check = datetime.now()
-                
-                return is_healthy
+            transport = inprocess_modules.get_transport(self.name)
+            if transport is None:
+                async with httpx.AsyncClient() as client:
+                    response = await client.get(
+                        f"{self.endpoints['http']}{self.health_check}",
+                        timeout=10.0
+                    )
+            else:
+                async with httpx.AsyncClient(transport=transport) as client:
+                    response = await client.get(f"http://in-process{self.health_check}", timeout=10.0)
+            
+            is_healthy = response.status_code == 200
+            self.status = ModuleStatus.HEALTHY if is_healthy else ModuleStatus.UNHEALTHY
+            self.last_health_check = datetime.now()
+            
+            return is_healthy
                 
         except Exception as e:
             logger.warning(f"Health check failed for {self.name}: {e}")
@@ -387,17 +393,22 @@ class ModuleRuntime:
             if settings.modules_validate_on_start:
                 logger.info(f"🔍 [REGISTER] Intentando health check...")
                 try:
-                    async with httpx.AsyncClient(timeout=2.0) as client:
-                        health_url = f"{module.endpoints['http']}{module.health_check}"
-                        response = await client.get(health_url)
-                        
-                        if response.status_code == 200:
-                            is_healthy = True
-                            module.status = ModuleStatus.HEALTHY
-                            logger.info(f"✅ [REGISTER] Módulo {name} está corriendo")
-                        else:
-                            is_healthy = False
-                            logger.warning(f"⚠️  [REGISTER] Módulo {name} no responde (HTTP {response.status_code})")
+                    transport = inprocess_modules.get_transport(name)
+                    if transport is None:
+                        async with httpx.AsyncClient(timeout=2.0) as client:
+                            health_url = f"{module.endpoints['http']}{module.health_check}"
+                            response = await client.get(health_url)
+                    else:
+                        async with httpx.AsyncClient(timeout=2.0, transport=transport) as client:
+                            response = await client.get(f"http://in-process{module.health_check}")
+                    
+                    if response.status_code == 200:
+                        is_healthy = True
+                        module.status = ModuleStatus.HEALTHY
+                        logger.info(f"✅ [REGISTER] Módulo {name} está corriendo")
+                    else:
+                        is_healthy = False
+                        logger.warning(f"⚠️  [REGISTER] Módulo {name} no responde (HTTP {response.status_code})")
                 except Exception as e:
                     is_healthy = False
                     logger.warning(f"⚠️  [REGISTER] Módulo {name} no está corriendo o no accesible: {type(e).__name__}")

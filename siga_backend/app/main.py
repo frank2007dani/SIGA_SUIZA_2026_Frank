@@ -9,6 +9,7 @@ import uuid
 import asyncio
 
 from .core.config import settings
+from .core import inprocess as inprocess_modules
 from .core.registry.runtime import module_runtime
 from .core.gateway.http_proxy import http_gateway
 from .core.gateway.websocket_proxy import ws_gateway
@@ -260,6 +261,16 @@ def _schedule_background(coro):
     task.add_done_callback(_background_tasks.discard)
     return task
 
+async def ensure_single_process_schema():
+    from .core.database import Base as core_base, engine as core_engine
+    from .core.identity.database import Base as identity_base, engine as identity_engine
+    from .core.identity import models as identity_models
+
+    async with core_engine.begin() as conn:
+        await conn.run_sync(core_base.metadata.create_all)
+    async with identity_engine.begin() as conn:
+        await conn.run_sync(identity_base.metadata.create_all)
+
 async def run_seeders_background():
     try:
         from .core.identity.database import AsyncSessionLocal
@@ -290,6 +301,12 @@ async def initialize_core():
     async with AsyncSessionLocal() as db:
         auth_service = AuthService(db)
         sm_module.init_security_middleware(auth_service)
+    
+    if inprocess_modules.enabled():
+        await ensure_single_process_schema()
+        logger.info("🧩 Cargando módulos en proceso único...")
+        inprocess_modules.load()
+        await inprocess_modules.start()
     
     _schedule_background(run_seeders_background())
     
@@ -335,6 +352,10 @@ async def startup_event():
 
 @app.on_event("shutdown") 
 async def shutdown_event():
+    if inprocess_modules.enabled():
+        logger.info("🧩 Cerrando módulos en proceso único...")
+        await inprocess_modules.shutdown()
+    
     logger.info("🛑 Cerrando gateway HTTP...")
     await http_gateway.close()
     

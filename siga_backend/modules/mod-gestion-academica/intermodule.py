@@ -9,6 +9,11 @@ import logging
 
 import httpx
 
+try:
+    from app.core import inprocess as inprocess_modules
+except ImportError:
+    inprocess_modules = None
+
 from config import enrollment_settings
 
 logger = logging.getLogger(__name__)
@@ -31,10 +36,16 @@ def _bases(kind: str):
 
 
 async def _get(kind: str, path: str):
+    transport = None
+    if inprocess_modules is not None:
+        target = {"programas": "mod-programas-estudio", "planes": "mod-planes-estudio"}.get(kind)
+        if target:
+            transport = inprocess_modules.get_transport(target)
     for base in _bases(kind):
         try:
-            async with httpx.AsyncClient(timeout=enrollment_settings.intermodule_timeout) as client:
-                response = await client.get(f"{base}{path}")
+            url = f"http://in-process{path}" if transport is not None else f"{base}{path}"
+            async with httpx.AsyncClient(timeout=enrollment_settings.intermodule_timeout, transport=transport) as client:
+                response = await client.get(url)
             if response.status_code == 200:
                 return response.json()
             logger.warning("intermodule %s%s -> HTTP %s", base, path, response.status_code)
