@@ -116,8 +116,7 @@ export function isPublicUrl(url) {
   return host.includes('.');
 }
 
-// API base para la página pública: ruta relativa, servida por el proxy /api del propio frontend
-// (Vite en desarrollo, nginx en producción). Así el celular solo necesita llegar a la web del sistema.
+// API base para la página pública: misma base configurada para el resto del frontend.
 export function publicApiBase() {
-  return '';
+  return API_BASE;
 }

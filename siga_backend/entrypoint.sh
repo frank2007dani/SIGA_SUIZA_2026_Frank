@@ -20,8 +20,13 @@ if [ "$SKIP_MIGRATIONS" != "true" ]; then
 fi
 
 if [ "$#" -eq 0 ]; then
-    echo "Starting SIGA Core con Hot Reload..."
-    exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    PORT="${PORT:-8000}"
+    if [ "$ENVIRONMENT" = "production" ]; then
+        echo "Starting SIGA Core on 0.0.0.0:$PORT"
+        exec uvicorn app.main:app --host 0.0.0.0 --port "$PORT"
+    fi
+    echo "Starting SIGA Core con Hot Reload on 0.0.0.0:$PORT..."
+    exec uvicorn app.main:app --host 0.0.0.0 --port "$PORT" --reload
 else
     echo "Starting Module with command: $@"
     exec "$@"

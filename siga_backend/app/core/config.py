@@ -2,6 +2,8 @@ from pydantic_settings import BaseSettings
 from typing import List, Optional
 from pydantic import Field
 
+from .db_url import build_async_database_url, build_sync_database_url, is_production
+
 class CoreSettings(BaseSettings):
     """Configuración centralizada del Core con resiliencia"""
     
@@ -10,6 +12,8 @@ class CoreSettings(BaseSettings):
     environment: str = "development"
     secret_key: str = "change-me-in-production"
     debug: bool = True
+    frontend_url: Optional[str] = Field(default=None, description="URL pública del frontend")
+    cors_origins: str = Field(default="", description="Orígenes CORS separados por coma")
     
     # Database (Solo para Identity del Core)
     DB_HOST: str = "localhost"
@@ -57,24 +61,51 @@ class CoreSettings(BaseSettings):
     circuit_breaker_recovery_timeout: int = Field(default=60, description="Tiempo de recuperación en segundos")
     
     @property
+    def is_production(self) -> bool:
+        return is_production() or self.environment.strip().lower() == "production"
+
+    @property
+    def effective_debug(self) -> bool:
+        return self.debug and not self.is_production
+
+    @property
     def database_url(self) -> str:
-        if self.DATABASE_URL:
-            url = self.DATABASE_URL
-            if url.startswith("postgresql://"):
-                url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
-            return url
-        return f"postgresql+asyncpg://{self.DB_USER}:{self.DB_PASSWORD}@{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}"
-    
+        if not self.DATABASE_URL and self.is_production:
+            raise RuntimeError("DATABASE_URL es obligatoria cuando ENVIRONMENT=production")
+        return build_async_database_url(
+            self.DATABASE_URL,
+            user=self.DB_USER,
+            password=self.DB_PASSWORD,
+            host=self.DB_HOST,
+            port=str(self.DB_PORT),
+            database=self.DB_NAME,
+        )
+
     @property
     def database_sync_url(self) -> str:
-        if self.DATABASE_URL:
-            url = self.DATABASE_URL
-            if url.startswith("postgresql+asyncpg://"):
-                url = url.replace("postgresql+asyncpg://", "postgresql+psycopg2://", 1)
-            elif url.startswith("postgresql://"):
-                url = url.replace("postgresql://", "postgresql+psycopg2://", 1)
-            return url
-        return f"postgresql+psycopg2://{self.DB_USER}:{self.DB_PASSWORD}@{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}"
+        if not self.DATABASE_URL and self.is_production:
+            raise RuntimeError("DATABASE_URL es obligatoria cuando ENVIRONMENT=production")
+        return build_sync_database_url(
+            self.DATABASE_URL,
+            user=self.DB_USER,
+            password=self.DB_PASSWORD,
+            host=self.DB_HOST,
+            port=str(self.DB_PORT),
+            database=self.DB_NAME,
+        )
+
+    @property
+    def allowed_origins(self) -> list[str]:
+        dev_origins = [
+            "http://localhost:5173", "http://127.0.0.1:5173",
+            "http://localhost:5174", "http://127.0.0.1:5174",
+            "http://localhost:3000", "http://127.0.0.1:3000",
+            "http://localhost:3001", "http://127.0.0.1:3001",
+        ]
+        configured = [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
+        if self.frontend_url:
+            configured.append(self.frontend_url.rstrip("/"))
+        return configured if self.is_production else dev_origins + configured
     
     @property
     def redis_url_effective(self) -> str:

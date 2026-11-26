@@ -8,7 +8,7 @@ app = FastAPI(title="mod-auditoria", version="1.0.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -21,6 +21,9 @@ def health_check():
 
 @app.on_event("startup")
 async def startup_event():
+    import os
+    if os.getenv("ENABLE_NATS", "true").strip().lower() in ("false", "0", "no"):
+        return
     import event_listener
     # Lanzar el listener de auditoría en background
     asyncio.create_task(event_listener.start_listener())

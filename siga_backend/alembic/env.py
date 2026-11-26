@@ -13,24 +13,17 @@ sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 # Configuración de Alembic
 config = context.config
 
-# Override DB URL desde variable de entorno
-db_url = os.getenv("DB_URL")
-if not db_url:
-    user = os.getenv("DB_USER", "postgres")
-    password = os.getenv("DB_PASSWORD", "john.007")
-    host = os.getenv("DB_HOST", "host.docker.internal")
-    port = os.getenv("DB_PORT", "5432")
-    dbname = os.getenv("DB_NAME", "siga_core")
-    db_url = f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{dbname}"
-    config.set_main_option("sqlalchemy.url", db_url)
-else:
-    config.set_main_option("sqlalchemy.url", db_url)
+from app.core.db_url import build_sync_database_url
 
-# Convertir asyncpg a psycopg (sync) para migraciones síncronas
-url = config.get_main_option("sqlalchemy.url")
-if url and "asyncpg" in url:
-    url = url.replace("postgresql+asyncpg://", "postgresql+psycopg://")
-    config.set_main_option("sqlalchemy.url", url)
+db_url = build_sync_database_url(
+    os.getenv("DB_URL") or os.getenv("DATABASE_URL"),
+    user=os.getenv("DB_USER", "postgres"),
+    password=os.getenv("DB_PASSWORD"),
+    host=os.getenv("DB_HOST", "localhost"),
+    port=os.getenv("DB_PORT", "5432"),
+    database=os.getenv("DB_NAME", "siga_suiza_2026"),
+)
+config.set_main_option("sqlalchemy.url", db_url)
 
 # Interpretar el archivo de config para logging
 if config.config_file_name is not None:

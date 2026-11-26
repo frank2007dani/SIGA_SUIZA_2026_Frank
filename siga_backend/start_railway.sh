@@ -2,12 +2,19 @@
 set -e
 
 echo "=========================================="
-echo "🚀 Iniciando SIGA Backend (Railway)"
+echo "🚀 Iniciando SIGA Backend (Render/Railway)"
 echo "=========================================="
 
 PORT="${PORT:-8000}"
 export PORT
 echo "📡 Puerto principal: $PORT"
+
+ENABLE_NATS="${ENABLE_NATS:-false}"
+export ENABLE_NATS
+
+PROGRAMAS_MODULE_URL="${PROGRAMAS_MODULE_URL:-http://127.0.0.1:8005}"
+PLANES_MODULE_URL="${PLANES_MODULE_URL:-http://127.0.0.1:8002}"
+export PROGRAMAS_MODULE_URL PLANES_MODULE_URL
 
 cleanup() {
     echo "🛑 Deteniendo servicios internos..."
@@ -16,8 +23,8 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-if [ -n "$DATABASE_URL" ]; then
-    echo "📦 DATABASE_URL detectada de Railway."
+if [ -n "$DATABASE_URL" ] && [ -z "$DB_URL" ]; then
+    echo "📦 DATABASE_URL detectada."
     export DB_URL="$DATABASE_URL"
 fi
 
@@ -43,7 +50,24 @@ python -m uvicorn main:app --host 127.0.0.1 --port 8007 --app-dir modules/mod-au
 python -m uvicorn main:app --host 127.0.0.1 --port 8008 --app-dir modules/mod-evaluacion &
 python -m uvicorn main:app --host 127.0.0.1 --port 8009 --app-dir modules/mod-admision &
 
-sleep 2
+echo "⏳ Esperando health checks internos..."
+for i in $(seq 1 60); do
+    ready=0
+    for port in 8001 8002 8005 8006 8007 8008 8009; do
+        if curl -fsS "http://127.0.0.1:$port/health" >/dev/null 2>&1; then
+            ready=$((ready + 1))
+        fi
+    done
+    if [ "$ready" -eq 7 ]; then
+        echo "✅ 7 módulos internos listos."
+        break
+    fi
+    sleep 1
+done
+
+if [ "$ready" -ne 7 ]; then
+    echo "⚠️ Solo $ready/7 módulos respondieron /health; continuando de todos modos."
+fi
 
 echo "🌐 Iniciando Core Gateway en 0.0.0.0:$PORT..."
 exec python -m uvicorn app.main:app --host 0.0.0.0 --port "$PORT"

@@ -25,21 +25,15 @@ app = FastAPI(
     title=settings.app_name,
     version="1.0.0",
     description="SIGA Core - Sistema Modular Ultraligero",
-    debug=settings.debug,
-    docs_url="/docs" if settings.debug else None,
-    redoc_url="/redoc" if settings.debug else None,
+    debug=settings.effective_debug,
+    docs_url="/docs" if settings.effective_debug else None,
+    redoc_url="/redoc" if settings.effective_debug else None,
 )
 
-# CORS para desarrollo
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173",
-    "http://localhost:5174", "http://127.0.0.1:5174",
-    "http://localhost:3000", "http://127.0.0.1:3000",
-    "http://localhost:3001", "http://127.0.0.1:3001"
-    ],
-    allow_origin_regex=r"https?://.*",
-    allow_credentials=True,
+    allow_origins=settings.allowed_origins,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -328,11 +322,12 @@ async def shutdown_event():
     logger.info("🛑 Core deteniéndose...")
 
 if __name__ == "__main__":
+    import os
     import uvicorn
     uvicorn.run(
         "app.main:app",
-        host="0.0.0.0", 
-        port=8000,
-        reload=settings.debug,
+        host="0.0.0.0",
+        port=int(os.getenv("PORT", "8000")),
+        reload=settings.effective_debug,
         log_level="info"
     )

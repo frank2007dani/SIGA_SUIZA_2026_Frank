@@ -6,6 +6,7 @@ from database import AsyncSessionLocal
 from models import AuditLog
 
 NATS_URL = os.getenv("NATS_URL", "nats://localhost:4222")
+ENABLE_NATS = os.getenv("ENABLE_NATS", "true").strip().lower() not in ("false", "0", "no")
 
 async def process_audit_event(msg):
     try:
@@ -36,6 +37,9 @@ async def process_audit_event(msg):
         print(f"[AUDITORIA] Error procesando evento: {e}")
 
 async def start_listener():
+    if not ENABLE_NATS:
+        print("ℹ️ ENABLE_NATS=false; Listener de auditoría desactivado")
+        return
     nc = NATS()
     try:
         await nc.connect(NATS_URL)

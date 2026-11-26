@@ -172,7 +172,7 @@
       var sello = params.get('s') || '';
       var $ = function (id) { return document.getElementById(id); };
       var mostrar = function (id) { $(id).classList.remove('oculto'); };
-      var API = '/api/mod-gestion-academica/tesoreria/publico/';
+      var API = '__SIGA_API_BASE__' + '/api/mod-gestion-academica/tesoreria/publico/';
 
       // Enlace corto "VER BOLETA" del QR (?recibo=...&dni=...&t=...): la boleta se pide al servidor
       if (params.has('recibo')) {

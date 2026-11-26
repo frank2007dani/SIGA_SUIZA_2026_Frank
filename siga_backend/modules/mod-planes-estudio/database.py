@@ -3,6 +3,8 @@ from sqlalchemy.orm import sessionmaker, declarative_base
 from sqlalchemy import MetaData
 import os
 from datetime import datetime
+
+from app.core.db_url import async_connect_args, build_async_database_url, is_production
 from sqlalchemy import Column, Integer, DateTime, String, JSON, Boolean
 
 DB_HOST = os.getenv("DB_HOST", "localhost")
@@ -11,11 +13,14 @@ DB_USER = os.getenv("DB_USER", "postgres")
 DB_PASSWORD = os.getenv("DB_PASSWORD")
 DB_NAME = os.getenv("DB_NAME", "siga_suiza_2026")
 
-DATABASE_URL = os.getenv("DATABASE_URL")
-if not DATABASE_URL:
-    DATABASE_URL = f"postgresql+asyncpg://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
-elif DATABASE_URL.startswith("postgresql://"):
-    DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://", 1)
+DATABASE_URL = build_async_database_url(
+    os.getenv("DATABASE_URL"),
+    user=DB_USER,
+    password=DB_PASSWORD,
+    host=DB_HOST,
+    port=DB_PORT,
+    database=DB_NAME,
+)
 
 metadata = MetaData()
 Base = declarative_base(metadata=metadata)
@@ -34,7 +39,11 @@ class OutboxEvent(BaseModel):
     payload = Column(JSON, nullable=False)
     published = Column(Boolean, default=False, index=True)
 
-engine = create_async_engine(DATABASE_URL, echo=True)
+engine = create_async_engine(
+    DATABASE_URL,
+    echo=not is_production(),
+    connect_args=async_connect_args(),
+)
 AsyncSessionLocal = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 async def get_db():

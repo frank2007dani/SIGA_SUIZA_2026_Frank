@@ -1,5 +1,13 @@
-export const API_BASE = import.meta.env.VITE_API_URL || '';
-export const WS_BASE = import.meta.env.VITE_WS_URL || `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}`;
+const normalizeBase = (value) => (value || '').replace(/\/$/, '');
+
+const apiBase = normalizeBase(import.meta.env.VITE_API_URL);
+const configuredWs = normalizeBase(import.meta.env.VITE_WS_URL);
+const derivedWs = apiBase
+  ? apiBase.replace(/^http:/, 'ws:').replace(/^https:/, 'wss:')
+  : `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}`;
+
+export const API_BASE = apiBase;
+export const WS_BASE = configuredWs || derivedWs;
 
 class SIGAApiClient {
   constructor() {

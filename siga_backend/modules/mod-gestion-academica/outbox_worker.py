@@ -14,8 +14,12 @@ except ImportError:
 import os
 
 NATS_URL = os.getenv("NATS_URL", "nats://localhost:4222")
+ENABLE_NATS = os.getenv("ENABLE_NATS", "true").strip().lower() not in ("false", "0", "no")
 
 async def outbox_worker():
+    if not ENABLE_NATS:
+        print("ℹ️ ENABLE_NATS=false; Outbox Worker desactivado")
+        return
     nc = None
     if NATS_AVAILABLE:
         nc = NATS()
