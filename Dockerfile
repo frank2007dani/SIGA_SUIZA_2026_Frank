@@ -18,6 +18,4 @@ COPY siga_backend /app
 
 RUN chmod +x /app/entrypoint.sh /app/start_railway.sh
 
-EXPOSE 8000
-
 CMD ["sh", "./start_railway.sh"]

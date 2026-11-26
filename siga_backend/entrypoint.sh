@@ -21,12 +21,12 @@ fi
 
 if [ "$#" -eq 0 ]; then
     PORT="${PORT:-8000}"
-    if [ "$ENVIRONMENT" = "production" ]; then
-        echo "Starting SIGA Core on 0.0.0.0:$PORT"
-        exec uvicorn app.main:app --host 0.0.0.0 --port "$PORT"
+    if [ "$ENVIRONMENT" = "development" ] || [ "$ENVIRONMENT" = "dev" ]; then
+        echo "Starting SIGA Core con Hot Reload on 0.0.0.0:$PORT..."
+        exec uvicorn app.main:app --host 0.0.0.0 --port "$PORT" --reload
     fi
-    echo "Starting SIGA Core con Hot Reload on 0.0.0.0:$PORT..."
-    exec uvicorn app.main:app --host 0.0.0.0 --port "$PORT" --reload
+    echo "Starting SIGA Core on 0.0.0.0:$PORT"
+    exec uvicorn app.main:app --host 0.0.0.0 --port "$PORT"
 else
     echo "Starting Module with command: $@"
     exec "$@"

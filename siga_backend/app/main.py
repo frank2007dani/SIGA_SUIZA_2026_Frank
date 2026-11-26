@@ -6,6 +6,7 @@ from typing import Optional
 from pydantic import BaseModel
 import logging
 import uuid
+import asyncio
 
 from .core.config import settings
 from .core.registry.runtime import module_runtime
@@ -251,6 +252,31 @@ async def handle_module_registered(event):
     await ws_gateway.broadcast(f"Módulo {event.data['module_name']} registrado")
 
 # === INICIALIZACIÓN DEL CORE ===
+_background_tasks = set()
+
+def _schedule_background(coro):
+    task = asyncio.create_task(coro)
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+    return task
+
+async def run_seeders_background():
+    try:
+        from .core.identity.database import AsyncSessionLocal
+        from .core.identity.seeds.seeder_runner import SeederRunner
+        async with AsyncSessionLocal() as db:
+            await SeederRunner(db).run_all()
+        logger.info("✅ Seeders completados en segundo plano")
+    except Exception as exc:
+        logger.exception(f"⚠️ Seeders en segundo plano fallaron: {exc}")
+
+async def discover_modules_background():
+    try:
+        discovered = await module_runtime.discover_modules()
+        logger.info(f"📦 Módulos descubiertos en segundo plano: {len(discovered)}")
+    except Exception as exc:
+        logger.exception(f"⚠️ Descubrimiento de módulos falló: {exc}")
+
 async def initialize_core():
     """Inicializa el Core al arrancar"""
     logger.info(f"🚀 Iniciando {settings.app_name} en modo {settings.environment}")
@@ -264,11 +290,8 @@ async def initialize_core():
     async with AsyncSessionLocal() as db:
         auth_service = AuthService(db)
         sm_module.init_security_middleware(auth_service)
-        
-        # 🆕 SISTEMA DE SEEDING PROFESIONAL
-        from .core.identity.seeds.seeder_runner import SeederRunner
-        seeder_runner = SeederRunner(db)
-        await seeder_runner.run_all()
+    
+    _schedule_background(run_seeders_background())
     
     # 2. Conectar Event Bus si está habilitado
     if settings.enable_nats:
@@ -284,8 +307,7 @@ async def initialize_core():
     
     # 3. Descubrir módulos si está habilitado
     if settings.modules_auto_discover:
-        discovered = await module_runtime.discover_modules()
-        logger.info(f"📦 Módulos descubiertos: {len(discovered)}")
+        _schedule_background(discover_modules_background())
     
    
     

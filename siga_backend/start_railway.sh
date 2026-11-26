@@ -50,24 +50,24 @@ python -m uvicorn main:app --host 127.0.0.1 --port 8007 --app-dir modules/mod-au
 python -m uvicorn main:app --host 127.0.0.1 --port 8008 --app-dir modules/mod-evaluacion &
 python -m uvicorn main:app --host 127.0.0.1 --port 8009 --app-dir modules/mod-admision &
 
-echo "⏳ Esperando health checks internos..."
-for i in $(seq 1 60); do
+echo "⏳ Health checks internos en segundo plano..."
+(
     ready=0
-    for port in 8001 8002 8005 8006 8007 8008 8009; do
-        if curl -fsS "http://127.0.0.1:$port/health" >/dev/null 2>&1; then
-            ready=$((ready + 1))
+    for i in $(seq 1 60); do
+        ready=0
+        for port in 8001 8002 8005 8006 8007 8008 8009; do
+            if curl -fsS "http://127.0.0.1:$port/health" >/dev/null 2>&1; then
+                ready=$((ready + 1))
+            fi
+        done
+        if [ "$ready" -eq 7 ]; then
+            echo "✅ 7 módulos internos listos."
+            exit 0
         fi
+        sleep 1
     done
-    if [ "$ready" -eq 7 ]; then
-        echo "✅ 7 módulos internos listos."
-        break
-    fi
-    sleep 1
-done
-
-if [ "$ready" -ne 7 ]; then
-    echo "⚠️ Solo $ready/7 módulos respondieron /health; continuando de todos modos."
-fi
+    echo "⚠️ Solo $ready/7 módulos respondieron /health."
+) &
 
 echo "🌐 Iniciando Core Gateway en 0.0.0.0:$PORT..."
 exec python -m uvicorn app.main:app --host 0.0.0.0 --port "$PORT"
