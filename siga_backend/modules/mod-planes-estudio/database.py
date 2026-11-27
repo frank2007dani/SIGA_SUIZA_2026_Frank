@@ -1,26 +1,12 @@
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker, declarative_base
 from sqlalchemy import MetaData
-import os
 from datetime import datetime
 
-from app.core.db_url import async_connect_args, build_async_database_url, is_production
+from app.core.db_url import async_engine_kwargs, env_database_url, register_engine
 from sqlalchemy import Column, Integer, DateTime, String, JSON, Boolean
 
-DB_HOST = os.getenv("DB_HOST", "localhost")
-DB_PORT = os.getenv("DB_PORT", "5432")
-DB_USER = os.getenv("DB_USER", "postgres")
-DB_PASSWORD = os.getenv("DB_PASSWORD")
-DB_NAME = os.getenv("DB_NAME", "siga_suiza_2026")
-
-DATABASE_URL = build_async_database_url(
-    os.getenv("DATABASE_URL"),
-    user=DB_USER,
-    password=DB_PASSWORD,
-    host=DB_HOST,
-    port=DB_PORT,
-    database=DB_NAME,
-)
+DATABASE_URL = env_database_url()
 
 metadata = MetaData()
 Base = declarative_base(metadata=metadata)
@@ -39,17 +25,16 @@ class OutboxEvent(BaseModel):
     payload = Column(JSON, nullable=False)
     published = Column(Boolean, default=False, index=True)
 
-engine = create_async_engine(
-    DATABASE_URL,
-    echo=not is_production(),
-    connect_args=async_connect_args(),
-)
+engine = register_engine(create_async_engine(DATABASE_URL, **async_engine_kwargs()))
 AsyncSessionLocal = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 async def get_db():
     async with AsyncSessionLocal() as db:
         try:
             yield db
+        except BaseException:
+            await db.rollback()
+            raise
         finally:
             await db.close()
 

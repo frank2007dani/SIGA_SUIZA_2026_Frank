@@ -9,6 +9,7 @@ import uuid
 import asyncio
 
 from .core.config import settings
+from .core.db_url import dispose_all_engines
 from .core import inprocess as inprocess_modules
 from .core.registry.runtime import module_runtime
 from .core.gateway.http_proxy import http_gateway
@@ -46,7 +47,7 @@ async def add_request_id(request: Request, call_next):
     """Agrega ID de request para tracing"""
     request_id = str(uuid.uuid4())
     request.state.request_id = request_id
-    
+
     response = await call_next(request)
     response.headers["X-Request-ID"] = request_id
     
@@ -361,7 +362,15 @@ async def shutdown_event():
     
     logger.info("🛑 Cerrando Event Bus...")
     await event_bus.close()
-    
+
+    for task in list(_background_tasks):
+        task.cancel()
+    if _background_tasks:
+        await asyncio.gather(*_background_tasks, return_exceptions=True)
+
+    logger.info("🛑 Cerrando motores de base de datos...")
+    await dispose_all_engines()
+
     logger.info("🛑 Core deteniéndose...")
 
 if __name__ == "__main__":

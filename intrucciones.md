@@ -1,348 +1,271 @@
-# Guía final de despliegue en Render
-
-Esta guía describe el estado técnico actual de `SIGA_SUIZA_2026` y el procedimiento recomendado para desplegarlo en Render. No contiene secretos ni URLs definitivas inventadas: los valores finales se configuran en el panel de Render.
-
-## 1. Objetivo y reglas
-
-Dejar el proyecto preparado para Render sin cambiar la lógica de negocio, los endpoints, las tablas, los módulos ni los modelos existentes.
-
-Reglas vigentes:
-
-1. No hacer `git commit`.
-2. No hacer `git push`.
-3. No borrar archivos importantes.
-4. No eliminar Docker Compose ni la base de datos local.
-5. No importar el dump automáticamente en el arranque.
-6. No poner contraseñas, tokens ni URLs secretas en archivos versionados.
-7. No crear servicios públicos separados para los módulos internos.
-8. No agregar `render.yaml`: la configuración final se define en el panel de Render.
-
-## 2. Arquitectura final
-
-```text
-Render Static Site (siga_frontend)
-        ↓ HTTPS
-Render Web Service Docker (Core + 7 módulos internos)
-        ↓ DATABASE_URL
-Render PostgreSQL administrado
-```
-
-- Frontend: React + Vite 8 publicado como Static Site.
-- Backend: FastAPI publicado como Web Service Docker usando el `Dockerfile` de la raíz.
-- Base de datos: PostgreSQL administrado por Render.
-- Microservicios: ejecutándose dentro del mismo contenedor del backend, en `127.0.0.1`.
-- NATS: desactivado inicialmente; queda como capacidad opcional.
-- Redis: no se utiliza inicialmente.
-- pgAdmin es solo una herramienta de administración; no aloja la base.
+Quiero que hagas una última revisión y corrección del proyecto `SIGA_SUIZA_2026_Frank`, específicamente para dejar funcionando correctamente la comunicación:
 
-## 3. Servicios que crear en Render
+FRONTEND (React/Vite)
+↓
+BACKEND (FastAPI)
+↓
+POSTGRESQL (Render)
 
-### 3.1 PostgreSQL
+Contexto actual:
 
-- Crear un PostgreSQL administrado en Render.
-- Copiar la `DATABASE_URL` generada y cargarla como secreto del Web Service.
-- No pegar esa URL en archivos del repositorio.
+- Rama de trabajo: `RENDER`
+- Frontend en `siga_frontend`
+- Backend en `siga_backend`
+- Backend desplegado en Render:
+  `https://siga-backend-pog5.onrender.com`
+- Frontend desplegado en Render:
+  `https://siga-frontend-pkpc.onrender.com`
+- PostgreSQL está en Render.
+- El backend actualmente funciona en modo de proceso único.
+- `POST /auth/login` funciona directamente en el backend.
+- `GET /auth/me` funciona directamente en el backend.
+- El problema histórico 405 ocurre cuando el frontend intenta enviar `/auth/login` a su propio dominio en lugar del backend.
+- El problema actual de CORS aparece porque el backend todavía necesita aceptar el origen real del frontend.
+- NO quiero agregar NATS para solucionar esto. NATS debe permanecer desactivado (`ENABLE_NATS=false`).
+- NO cambies la lógica de negocio, modelos, autenticación ni contratos de las APIs salvo que sea estrictamente necesario para solucionar la comunicación.
+- NO hagas commit ni push. Yo haré el push manualmente después.
 
-### 3.2 Backend Web Service
+OBJETIVO PRINCIPAL
 
-- Tipo: Docker.
-- Root Directory: raíz del repositorio.
-- Dockerfile: `Dockerfile`.
-- Start Command: `sh ./start_railway.sh`.
-- Health Check Path: `/health`.
-- El contenedor escucha en `0.0.0.0:$PORT`.
-- `start_railway.sh` levanta los 7 módulos internos, espera sus `/health` y después inicia el Core.
-- No usar `--reload` cuando `ENVIRONMENT=production`.
-
-### 3.3 Frontend Static Site
-
-- Root Directory: `siga_frontend`.
-- Build Command: `npm ci && npm run build`.
-- Publish Directory: `dist` desde `siga_frontend` (`siga_frontend/dist` desde la raíz del repo).
-- Requiere Node 22 o superior porque Vite 8 declara `engines.node >= 20.19 || >=22.12`; usar Node 22 para evitar avisos `EBADENGINE`.
-- Agregar rewrite de SPA: `/*` → `/index.html`, status `200`.
-- `VITE_API_URL` se lee en tiempo de build; cambiarlo exige rebuild/redeploy.
+Dejar el código preparado para que, después de hacer build y desplegar en Render, ocurra exactamente esto:
 
-### 3.4 NATS
+1. El usuario abre:
+   https://siga-frontend-pkpc.onrender.com
 
-- No crear inicialmente.
-- Si se necesita auditoría en tiempo real o entrega real de eventos, crear un servicio NATS privado y configurar `ENABLE_NATS=true` con `NATS_URL`.
-- No publicar el puerto de NATS.
-
-### 3.5 Otros
-
-- No crear 7 Web Services para los módulos.
-- No crear Redis para el despliegue inicial.
-- No crear servicios adicionales salvo que aparezca una necesidad técnica real.
-
-## 4. Puertos
-
-### Producción Render
-
-| Servicio | Puerto | Exposición |
-|---|---:|---|
-| Backend Core | `$PORT` | Público |
-| `mod-usuarios` | 8001 | Interno `127.0.0.1` |
-| `mod-planes-estudio` | 8002 | Interno `127.0.0.1` |
-| `mod-programas-estudio` | 8005 | Interno `127.0.0.1` |
-| `mod-gestion-academica` | 8006 | Interno `127.0.0.1` |
-| `mod-auditoria` | 8007 | Interno `127.0.0.1` |
-| `mod-evaluacion` | 8008 | Interno `127.0.0.1` |
-| `mod-admision` | 8009 | Interno `127.0.0.1` |
-| PostgreSQL Render | gestionado por Render | Interno/privado |
-| NATS opcional | 4222 | Interno/privado |
-
-### Desarrollo local
-
-| Servicio | Puerto |
-|---|---:|
-| Frontend | `http://localhost:5173` |
-| Backend | `http://localhost:8000` |
-| PostgreSQL | `localhost:5433` |
-| Redis | `localhost:6379` |
-| NATS | `localhost:4222` |
-| Módulos | `8001`, `8002`, `8005`, `8006`, `8007`, `8008`, `8009` |
+2. El frontend hace login contra:
+   https://siga-backend-pog5.onrender.com/auth/login
 
-## 5. Variables de entorno
-
-### 5.1 Backend obligatorias
-
-- `DATABASE_URL` — secreto; lo genera Render.
-- `SECRET_KEY` — secreto; generar un valor seguro en Render.
-- `ENVIRONMENT=production`.
-- `PORT` — Render lo inyecta automáticamente.
-- `FRONTEND_URL` — origen real del frontend.
-- `CORS_ORIGINS` — lista separada por comas con los orígenes permitidos.
-- `SKIP_MIGRATIONS=false` — al menos en el primer despliegue.
-
-### 5.2 Backend opcionales recomendadas
-
-- `DEBUG=false`.
-- `DB_SSLMODE` — `disable`, `require`, `verify-ca` o `verify-full`; solo si no viene en `DATABASE_URL`.
-- `PROGRAMAS_MODULE_URL` — default `http://127.0.0.1:8005`.
-- `PLANES_MODULE_URL` — default `http://127.0.0.1:8002`.
-- `ENABLE_NATS=false`.
-- `NATS_URL` — solo si `ENABLE_NATS=true`.
-
-### 5.3 Frontend obligatoria
-
-- `VITE_API_URL` — base URL del backend en Render.
-
-### 5.4 Frontend opcional
-
-- `VITE_WS_URL` — si se omite, se deriva desde `VITE_API_URL`.
-
-### 5.5 Solo desarrollo local
-
-- `DB_USER`, `DB_PASSWORD`, `DB_NAME`, `DB_HOST`, `DB_PORT`.
-- `SIGA_DB_HOST`, `SIGA_DB_PORT`.
-- `POSTGRES_HOST_PORT`, `FRONTEND_PORT`.
+3. El backend procesa:
+   FastAPI → AuthService → PostgreSQL
 
-No mostrar valores secretos en documentación, logs, respuestas HTTP ni archivos del repositorio.
-
-## 6. Base de datos
+4. El backend devuelve el JWT.
 
-- El backend usa `DATABASE_URL` como fuente principal.
-- La URL se convierte al driver asíncrono `postgresql+asyncpg://`.
-- `sslmode` se elimina de la query antes de pasarla a asyncpg para evitar `connect() got an unexpected keyword argument 'sslmode'`.
-- La decisión SSL se lee de la URL original:
-  - `sslmode=disable` → SSL desactivado;
-  - `require`, `verify-ca`, `verify-full` → SSL activado;
-  - sin `sslmode` → SSL activado solo en producción con host externo.
-- Para URLs construidas desde variables `DB_*`, se puede usar `DB_SSLMODE`.
-- Alembic usa la misma base pero con psycopg3 mediante `build_sync_database_url()`.
-- `alembic.ini` no contiene URL embebida.
-- Revisión actual confirmada: `b1c2d3e4f5a6 (head)`.
-- Smoke con base vacía creó 23 tablas.
+5. El frontend guarda el token y posteriormente hace:
+   https://siga-backend-pog5.onrender.com/auth/me
 
-### 6.1 Migraciones
-
-- Ejecutar `alembic upgrade head` en el arranque salvo que `SKIP_MIGRATIONS=true`.
-- Mantener `SKIP_MIGRATIONS=false` en el primer despliegue.
-- Con base vacía y `SKIP_MIGRATIONS=true`, `/core/status` falló porque no existía `core_modules`.
-- Una vez migrada la base, `SKIP_MIGRATIONS=true` puede usarse como optimización si se confirma que el esquema ya existe.
-
-### 6.2 Importación del dump
-
-- Archivo: `dump_siga_suiza_2026_20261021.sql`.
-- No importarlo automáticamente en el arranque.
-- Importarlo manualmente con `psql` usando la URL interna o externa que entregue Render.
-- El dump viene de PostgreSQL 18; si el destino es PostgreSQL 16, quitar:
-  - `\restrict`
-  - `\unrestrict`
-  - `SET transaction_timeout = 0;`
-- No ejecutar migraciones destructivas ni borrar tablas existentes.
-- No agregar el dump al repositorio si contiene datos sensibles.
+6. Todas las rutas `/auth`, `/api`, `/core` y las demás llamadas API deben apuntar al backend mediante la URL configurada en `VITE_API_URL`.
 
-## 7. CORS
+7. El frontend NUNCA debe intentar hacer:
+   https://siga-frontend-pkpc.onrender.com/auth/login
 
-- El Core usa `FRONTEND_URL` y `CORS_ORIGINS`.
-- En producción se usa la lista configurada, no un regex abierto.
-- En desarrollo se conservan orígenes `localhost` habituales.
-- La autenticación usa Bearer token en `localStorage`, no cookies; por eso `allow_credentials=False`.
-- Revisar errores CORS y mixed content después del despliegue.
+CORRECCIONES QUE DEBES VERIFICAR
 
-## 8. Microservicios internos
+A. FRONTEND
 
-`start_railway.sh` exporta las URLs internas y levanta estos procesos:
+Revisa `siga_frontend/src/core/api/client.jsx` y cualquier archivo relacionado con las peticiones.
 
-| Puerto | Módulo |
-|---:|---|
-| 8001 | `mod-usuarios` |
-| 8002 | `mod-planes-estudio` |
-| 8005 | `mod-programas-estudio` |
-| 8006 | `mod-gestion-academica` |
-| 8007 | `mod-auditoria` |
-| 8008 | `mod-evaluacion` |
-| 8009 | `mod-admision` |
+Debe existir una construcción equivalente a:
 
-No exponer estos puertos en Render. El único puerto público del backend es `$PORT`.
+`const API_BASE = normalizeBase(import.meta.env.VITE_API_URL)`
 
-## 9. NATS
-
-- Con `ENABLE_NATS=false`, el Core Event Bus, los Outbox Workers y el Event Listener de Auditoría quedan desactivados.
-- HTTP, login, health checks y módulos internos funcionan sin NATS.
-- Para habilitarlo:
-  1. Crear un NATS privado accesible solo desde Render.
-  2. Configurar `ENABLE_NATS=true`.
-  3. Configurar `NATS_URL` con el host interno y puerto `4222`.
-- El código usa pub/sub simple; no configurar JetStream.
-
-## 10. Archivos clave del backend
-
-- `Dockerfile`: imagen de producción del Web Service.
-- `.dockerignore`: excluye `.env`, Excel, dumps, logs y documentación del contexto de build.
-- `siga_backend/start_railway.sh`: arranque Render/Railway del Core + módulos.
-- `siga_backend/app/core/db_url.py`: construcción segura de URLs y SSL.
-- `siga_backend/app/core/config.py`: variables, CORS y guards de producción.
-- `siga_backend/app/main.py`: FastAPI, CORS, health, status, gateway y WebSocket.
-- `siga_backend/alembic/env.py`: migraciones con psycopg3.
-- `siga_backend/db_scripts/000_outbox_events.sql`: pre-creación compartida de outbox.
-- `siga_backend/modules/*/database.py`: motores de cada módulo usando el helper central.
-
-Docker Compose sigue siendo para desarrollo local y no debe eliminarse.
-
-## 11. Archivos clave del frontend
-
-- `siga_frontend/src/core/api/client.jsx`: `API_BASE` y `WS_BASE`.
-- `siga_frontend/src/modules/finances/lib/tesoreriaApi.js`: base pública de tesorería.
-- `siga_frontend/public/boleta.html`: usa el placeholder `__SIGA_API_BASE__`.
-- `siga_frontend/vite.config.js`: inyecta `VITE_API_URL` en `dist/boleta.html` durante el build.
-- `siga_frontend/dist`: output publicado en Render.
-
-No debe quedar `http://localhost:8000` fijo en producción.
-
-## 12. Verificación local
-
-Reconstruir el stack:
-
-```powershell
-docker compose up -d --build
-```
-
-Comprobar:
-
-```powershell
-curl.exe http://localhost:8000/health
-curl.exe http://localhost:8000/core/status
-curl.exe http://localhost:8000/docs
-curl.exe http://localhost:8000/openapi.json
-```
-
-También deben responder `200`:
-
-```text
-http://localhost:5173/
-http://localhost:8001/health
-http://localhost:8002/health
-http://localhost:8005/health
-http://localhost:8006/health
-http://localhost:8007/health
-http://localhost:8008/health
-http://localhost:8009/health
-```
-
-Estado verificado localmente: todos esos endpoints respondieron `200` y `/core/status` reportó `7/7` módulos sanos en entorno `development`.
-
-## 13. Verificación en Render
-
-Definir en la sesión local una variable temporal con la URL real del backend, sin guardarla en archivos:
-
-```powershell
-$BACKEND_URL = "<URL_PUBLICA_DEL_BACKEND_RENDER>"
-```
-
-Comprobar:
-
-```powershell
-curl.exe "$BACKEND_URL/health"
-curl.exe "$BACKEND_URL/core/status"
-curl.exe "$BACKEND_URL/openapi.json"
-```
-
-Resultado esperado:
-
-- `/health` → `200`.
-- `/core/status` → `200` con `7/7` módulos healthy.
-- `/docs` → `404` en producción.
-- `/openapi.json` → `200`.
-- Login y navegación principal sin errores CORS.
-- Boleta pública usando `VITE_API_URL`.
-
-## 14. Estado de pruebas
-
-### Pasaron
-
-- `docker build -f Dockerfile -t siga-render-test:local .`
-- `python -m compileall -q app modules alembic` dentro de la imagen.
-- Smoke de Render con PostgreSQL temporal y credenciales dummy:
-  - migraciones hasta `b1c2d3e4f5a6 (head)`;
-  - 23 tablas creadas;
-  - `/health` `200`;
-  - `/core/status` `200` con `7/7` módulos;
-  - `/docs` `404`;
-  - `/openapi.json` `200`;
-  - puertos internos `200`.
-- Rebuild local de Docker Compose y todos los curls indicados en la sección 12.
-- Build frontend con Node 22.
-- `dist/boleta.html` contiene la API inyectada y ya no contiene el placeholder.
-- Una ejecución de la suite frontend pasó `70/70`.
-- `src/test/docente_evaluation.test.jsx` aislado pasó `14/14`.
-
-### No estables o fallaron
-
-- Ejecutar tests frontend desde Windows bind mount produjo `Failed to start forks worker ... Timeout waiting for worker to respond`.
-- Ejecutar en filesystem interno con `--pool=threads --maxWorkers=2` pasó una vez `70/70`, pero otra vez falló `10/70` por timeouts.
-- `--isolate=false` produjo fallos artificiales por DOM compartido; no es configuración válida.
-- `--testTimeout=15000 --maxWorkers=2`: `7 failed / 63 passed`.
-- `--maxWorkers=1 --testTimeout=15000`: entre `1 failed / 69 passed` y `2 failed / 68 passed`.
-
-Conclusión: el build de producción funciona, pero la suite frontend no es estable. No se cambió lógica de negocio ni tests para forzar resultados.
-
-## 15. Errores comunes
-
-- `connect() got an unexpected keyword argument 'sslmode'`: usar `app/core/db_url.py`; no pasar `sslmode` en `connect_args`.
-- `password authentication failed`: asegurar que la URL real conserva el password al construir el engine.
-- `relation "core_modules" does not exist`: ejecutar migraciones; no usar `SKIP_MIGRATIONS=true` con base vacía.
-- `No module named psycopg2`: Alembic usa psycopg3; no usar URLs `+psycopg2`.
-- Frontend sin conexión: revisar `VITE_API_URL`, CORS y HTTPS.
-- HTTP 405: revisar método y ruta llamada; no apuntar al dominio estático.
-- Módulo 8006 sin responder: revisar `SIGA_MODULE_GESTION_ACADEMICA_URL` y health checks internos.
-- Problemas de puerto: Render asigna `$PORT`; no hardcodear `8000` en producción.
-
-## 16. Procedimiento de despliegue
-
-1. Revisar cambios y decidir si se estabilizan los tests frontend.
-2. Hacer commit de los cambios.
-3. Hacer push a GitHub.
-4. Crear PostgreSQL en Render.
-5. Crear el Backend Web Service Docker desde el `Dockerfile` raíz.
-6. Configurar las variables backend obligatorias y opcionales.
-7. Configurar health check `/health`.
-8. Crear el Frontend Static Site desde `siga_frontend`.
-9. Configurar `VITE_API_URL` y la rewrite SPA.
-10. Verificar `/health`, `/core/status`, `/openapi.json` y login.
-11. Importar el dump manualmente si se requieren datos reales.
-12. Confirmar que `/core/status` muestre `7/7` módulos sanos.
-
-No hacer commit ni push automáticamente; esas acciones las ejecuta el usuario.
+y las peticiones deben construirse usando:
+
+`API_BASE + endpoint`
+
+Verifica especialmente:
+
+- `/auth/login`
+- `/auth/me`
+- `/api/...`
+- `/core/...`
+
+No dejes rutas absolutas incorrectas.
+No dejes URLs localhost.
+No dejes URLs relativas que hagan que el navegador use el dominio del frontend.
+
+B. VITE_API_URL
+
+Revisa la configuración de Vite y confirma que el proyecto permite utilizar:
+
+`VITE_API_URL=https://siga-backend-pog5.onrender.com`
+
+Recuerda que `VITE_API_URL` se incorpora durante el BUILD, por lo que el código debe quedar preparado para que Render la utilice correctamente.
+
+Haz una validación del build y comprueba que el bundle generado contenga:
+
+`https://siga-backend-pog5.onrender.com`
+
+y que NO contenga:
+
+- `localhost`
+- `127.0.0.1`
+- `https://siga-frontend-pkpc.onrender.com/auth/login`
+
+C. NGINX DEL FRONTEND
+
+Revisa `siga_frontend/nginx.conf`.
+
+El frontend y backend están en servicios separados de Render.
+
+Por lo tanto:
+
+- NO debe existir `proxy_pass http://siga-core:8000`
+- NO debe depender de un hostname Docker llamado `siga-core`
+- Nginx debe servir correctamente la SPA de React
+- Debe existir fallback hacia `index.html`
+
+La comunicación frontend/backend debe realizarse mediante `VITE_API_URL`, no mediante proxy interno Docker.
+
+D. CORS DEL BACKEND
+
+Revisa toda la configuración CORS del backend.
+
+Debe permitir específicamente el origen:
+
+`https://siga-frontend-pkpc.onrender.com`
+
+Debe ser posible configurar esto mediante variables de entorno como:
+
+`FRONTEND_URL=https://siga-frontend-pkpc.onrender.com`
+
+o:
+
+`CORS_ORIGINS=https://siga-frontend-pkpc.onrender.com`
+
+Utiliza el mecanismo que ya tenga implementado el proyecto. No dupliques innecesariamente la configuración.
+
+Asegúrate de que una petición:
+
+OPTIONS /auth/login
+
+desde:
+
+Origin: https://siga-frontend-pkpc.onrender.com
+
+no sea rechazada por CORS.
+
+También verifica que el middleware CORS esté aplicado correctamente antes de las rutas.
+
+E. LOGIN
+
+Revisa exactamente cómo espera recibir los datos:
+
+`POST /auth/login`
+
+No cambies el contrato del backend simplemente para adaptarlo al frontend.
+
+El frontend debe enviar la petición exactamente como el backend la espera actualmente.
+
+Confirma:
+
+- status 200 con credenciales válidas
+- respuesta JSON
+- `access_token`
+- `token_type`
+- información del usuario
+
+F. TOKEN
+
+Revisa que después del login:
+
+- el token se guarde correctamente
+- las peticiones protegidas utilicen:
+
+`Authorization: Bearer <token>`
+
+- `/auth/me` utilice el backend real
+- no se pierda el token al recargar la aplicación
+
+G. BACKEND Y POSTGRESQL
+
+No cambies la arquitectura actual que ya funciona.
+
+Mantén:
+
+- `DATABASE_URL`
+- `DB_SSLMODE=require`
+- pool optimizado
+- proceso único
+- PostgreSQL de Render
+
+No vuelvas a implementar los 7 microservicios como procesos Uvicorn independientes.
+
+No agregues NATS solamente para resolver login/CORS.
+
+H. VARIABLES DE RENDER
+
+Al finalizar, indícame claramente cuáles variables deben estar configuradas en Render.
+
+Para BACKEND, verifica especialmente:
+
+`DATABASE_URL`
+`SECRET_KEY`
+`ENVIRONMENT=production`
+`DEBUG=false`
+`DB_SSLMODE=require`
+`ENABLE_NATS=false`
+`SKIP_MIGRATIONS=true`
+`SIGA_SINGLE_PROCESS=true`
+`FRONTEND_URL=https://siga-frontend-pkpc.onrender.com`
+
+y las variables de pool que ya utiliza el proyecto.
+
+Para FRONTEND, verifica:
+
+`VITE_API_URL=https://siga-backend-pog5.onrender.com`
+
+No necesito que modifiques Render directamente; solamente dime exactamente qué debo configurar allí.
+
+I. PRUEBAS
+
+Antes de terminar, realiza las pruebas que sean posibles localmente:
+
+1. `npm run build`
+2. Validación del bundle generado.
+3. `compileall` del backend si corresponde.
+4. Pruebas existentes del backend.
+5. Revisar que no existan URLs localhost en producción.
+6. Revisar que no existan llamadas relativas incorrectas para `/auth`, `/api` o `/core`.
+
+También quiero que revises el código completo buscando cualquier otra llamada que todavía esté usando:
+
+`fetch("/auth/...")`
+`axios("/auth/...")`
+`fetch("/api/...")`
+`fetch("/core/...")`
+
+sin pasar por el cliente/API base correspondiente.
+
+IMPORTANTE:
+
+No quiero que solamente me digas qué está mal.
+
+QUIERO QUE APLIQUES LAS CORRECCIONES NECESARIAS EN LOS ARCHIVOS DEL PROYECTO.
+
+Después:
+
+1. Ejecuta las validaciones.
+2. Muéstrame exactamente qué archivos modificaste.
+3. Explica brevemente qué corregiste en cada uno.
+4. Indica qué variables debo configurar manualmente en Render.
+5. Indica exactamente qué pruebas debo hacer después del deploy para confirmar:
+
+Frontend
+→ Backend
+→ PostgreSQL
+
+6. NO hagas `git commit`.
+7. NO hagas `git push`.
+
+Al final dame un resumen con este formato:
+
+ESTADO DEL CÓDIGO:
+- Frontend → Backend: OK / PENDIENTE
+- CORS: OK / PENDIENTE
+- Login: OK / PENDIENTE
+- JWT: OK / PENDIENTE
+- Backend → PostgreSQL: OK / PENDIENTE
+- Nginx: OK / PENDIENTE
+- Build frontend: OK / PENDIENTE
+- NATS: NO NECESARIO / NECESARIO
+
+CAMBIOS REALIZADOS:
+[lista de archivos y cambios]
+
+VARIABLES QUE DEBO CONFIGURAR EN RENDER:
+[lista exacta]
+
+PRUEBAS QUE DEBO HACER EN RENDER:
+[pasos exactos]
+
+NO HAGAS COMMIT NI PUSH.

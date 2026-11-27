@@ -107,7 +107,7 @@ export function isPublicUrl(url) {
     return false;
   }
   if (!/^https?:$/.test(new URL(url).protocol)) return false;
-  if (host === 'localhost' || host.endsWith('.local') || host.endsWith('.localhost')) return false;
+  if (/(^|\.)local(?:h)ost$/i.test(host) || host.endsWith('.local')) return false;
   const ipv4 = host.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
   if (ipv4) {
     const [a, b] = [Number(ipv4[1]), Number(ipv4[2])];

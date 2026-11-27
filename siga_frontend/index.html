@@ -12,7 +12,7 @@
       if (/[?&]boleta=/.test(location.search)) location.replace('/boleta.html' + location.search);
     </script>
     <script>
-      // Desregistrar service workers heredados (p. ej. Código Rojo u otros proyectos en localhost)
+      // Desregistrar service workers heredados (p. ej. Código Rojo u otros proyectos en entorno local)
       if ('serviceWorker' in navigator) {
         navigator.serviceWorker.getRegistrations().then(function(registrations) {
           for (var r of registrations) {

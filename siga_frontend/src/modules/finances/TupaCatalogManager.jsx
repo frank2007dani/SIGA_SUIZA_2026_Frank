@@ -279,7 +279,7 @@ export function TupaCatalogManager({ catalog, catalogError, onSaveConcept, onDel
           />
           <p className="text-[10.5px] text-slate-500 mt-1.5 leading-relaxed">
             Normalmente no hace falta: si abres el sistema desde su dirección de internet, el QR la usa automáticamente.
-            Escríbela solo si la dirección pública es distinta. Las direcciones locales (localhost o IP de la red interna) no sirven,
+            Escríbela solo si la dirección pública es distinta. Las direcciones locales (equipo local o IP de la red interna) no sirven,
             porque quien escanea no está en esa red.
           </p>
           {(configForm.urlPublica || '').trim() && !isPublicUrl(configForm.urlPublica.trim()) && (

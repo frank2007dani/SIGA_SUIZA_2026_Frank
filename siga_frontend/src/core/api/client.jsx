@@ -1,13 +1,39 @@
-const normalizeBase = (value) => (value || '').replace(/\/$/, '');
+const normalizeBase = (value) => (value || '').trim().replace(/\/+$/, '');
 
 const apiBase = normalizeBase(import.meta.env.VITE_API_URL);
-const configuredWs = normalizeBase(import.meta.env.VITE_WS_URL);
+
+if (import.meta.env.PROD && !/^https:\/\//.test(apiBase)) {
+  throw new Error('VITE_API_URL debe ser la URL HTTPS absoluta del backend de Render.');
+}
+
+const configuredWs = normalizeBase(import.meta.env.VITE_WS_URL).replace(/\/ws$/, '');
 const derivedWs = apiBase
   ? apiBase.replace(/^http:/, 'ws:').replace(/^https:/, 'wss:')
   : `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}`;
 
 export const API_BASE = apiBase;
 export const WS_BASE = configuredWs || derivedWs;
+
+const SENSITIVE_KEYS = new Set(['password', 'token', 'access_token', 'refresh_token', 'authorization']);
+
+const redact = (value) => {
+  if (Array.isArray(value)) return value.map(redact);
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [
+        key,
+        SENSITIVE_KEYS.has(key.toLowerCase()) ? '[REDACTED]' : redact(item),
+      ]),
+    );
+  }
+  return value;
+};
+
+const safeUrl = (url) => url.split('?')[0];
+
+const debugRequest = (payload) => {
+  if (import.meta.env.DEV) console.debug('[SIGA API]', payload);
+};
 
 class SIGAApiClient {
   constructor() {
@@ -45,6 +71,9 @@ class SIGAApiClient {
       config.headers.Authorization = `Bearer ${this.token}`;
     }
 
+    const method = (config.method || 'GET').toUpperCase();
+    debugRequest({ url: safeUrl(url), method });
+
     try {
       const response = await fetch(url, config);
 
@@ -53,8 +82,12 @@ class SIGAApiClient {
           let errorMsg = 'Credenciales inválidas';
           try {
             const errorData = await response.json();
+            debugRequest({ url: safeUrl(url), method, status: response.status, body: redact(errorData) });
             errorMsg = errorData.detail || errorMsg;
-          } catch (_) {}
+          } catch {
+            debugRequest({ url: safeUrl(url), method, status: response.status });
+            errorMsg = 'Credenciales inválidas';
+          }
           throw new Error(errorMsg);
         }
         this.clearToken();
@@ -66,14 +99,17 @@ class SIGAApiClient {
         let errorMsg = `HTTP error! status: ${response.status}`;
         try {
           const errorData = await response.json();
+          debugRequest({ url: safeUrl(url), method, status: response.status, body: redact(errorData) });
           errorMsg = errorData.detail || errorMsg;
         } catch {
-          // ignore
+          debugRequest({ url: safeUrl(url), method, status: response.status });
         }
         throw new Error(errorMsg);
       }
 
-      return await response.json();
+      const data = await response.json();
+      debugRequest({ url: safeUrl(url), method, status: response.status, body: redact(data) });
+      return data;
     } catch (error) {
       console.error('API Request failed:', error);
       throw error;

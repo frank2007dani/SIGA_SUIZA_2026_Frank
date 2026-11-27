@@ -2,18 +2,17 @@ from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker, declarative_base  # 👈 AGREGAR declarative_base aquí
 from sqlalchemy import MetaData
 from ..config import settings
-from ..db_url import async_connect_args
+from ..db_url import async_engine_kwargs, register_engine
 
 # Metadata específica para Identity (separada del Core)
 metadata = MetaData()
 Base = declarative_base(metadata=metadata)
 
-engine = create_async_engine(
-    settings.database_url,
-    echo=settings.effective_debug,
-    connect_args=async_connect_args(),
-    pool_pre_ping=True,
-    pool_recycle=300
+engine = register_engine(
+    create_async_engine(
+        settings.database_url,
+        **async_engine_kwargs(echo=settings.effective_debug),
+    )
 )
 
 # Session local para Identity
@@ -28,5 +27,8 @@ async def get_identity_db():
     async with AsyncSessionLocal() as session:
         try:
             yield session
+        except BaseException:
+            await session.rollback()
+            raise
         finally:
             await session.close()

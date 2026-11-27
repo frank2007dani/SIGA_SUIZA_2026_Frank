@@ -6,23 +6,10 @@ import os
 import sys
 from datetime import datetime
 
-from app.core.db_url import async_connect_args, build_async_database_url, is_production
+from app.core.db_url import async_engine_kwargs, env_database_url, register_engine
 from sqlalchemy import Column, Integer, DateTime, String, JSON, Boolean
 
-DB_HOST = os.getenv("DB_HOST", "localhost")
-DB_PORT = os.getenv("DB_PORT", "5432")
-DB_USER = os.getenv("DB_USER", "postgres")
-DB_PASSWORD = os.getenv("DB_PASSWORD")
-DB_NAME = os.getenv("DB_NAME", "siga_suiza_2026")
-
-DATABASE_URL = build_async_database_url(
-    os.getenv("DATABASE_URL"),
-    user=DB_USER,
-    password=DB_PASSWORD,
-    host=DB_HOST,
-    port=DB_PORT,
-    database=DB_NAME,
-)
+DATABASE_URL = env_database_url()
 
 metadata = MetaData()
 Base = declarative_base(metadata=metadata)
@@ -43,19 +30,12 @@ class OutboxEvent(BaseModel):
 
 _is_test = (os.getenv("DB_NAME") == "siga_test") or ("pytest" in sys.modules)
 
-_connect_args = async_connect_args()
-if _is_test:
-    engine = create_async_engine(DATABASE_URL, echo=False, poolclass=NullPool, connect_args=_connect_args)
-else:
-    engine = create_async_engine(
+engine = register_engine(
+    create_async_engine(
         DATABASE_URL,
-        echo=not is_production(),
-        pool_size=10,
-        max_overflow=20,
-        pool_pre_ping=True,
-        pool_recycle=300,
-        connect_args=_connect_args,
+        **async_engine_kwargs(poolclass=NullPool if _is_test else None, echo=False if _is_test else None),
     )
+)
 AsyncSessionLocal = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 async def get_db():

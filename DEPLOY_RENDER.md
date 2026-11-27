@@ -25,7 +25,9 @@ Guía práctica para dejar `SIGA_SUIZA_2026` funcionando en Render. No incluye s
 
 - Entrypoint real: `siga_backend/app/main.py` (`app = FastAPI(...)`).
 - Comando de Render: `sh ./start_railway.sh` (ya es el `CMD` del `Dockerfile` raíz).
-- `start_railway.sh` escucha en `0.0.0.0:$PORT`, levanta los módulos en `127.0.0.1`, espera sus `/health` y luego inicia el Core.
+- `start_railway.sh` escucha en `0.0.0.0:$PORT` y, con `SIGA_SINGLE_PROCESS=true`, carga los 7 módulos dentro del mismo proceso Uvicorn.
+- No se lanzan los Uvicorn internos de los puertos 8001/8002/8005/8006/8007/8008/8009 en producción.
+- El Gateway es el único punto HTTP público: `POST /auth/login` está registrado directamente en `app/main.py`; el proxy `/api/{modulo}/{ruta}` es solo para módulos.
 - No se usa `--reload` cuando `ENVIRONMENT=production`.
 - Health check de Render: `/health`.
 
@@ -41,8 +43,10 @@ Guía práctica para dejar `SIGA_SUIZA_2026` funcionando en Render. No incluye s
 - Render crea el servicio administrado y entrega `DATABASE_URL`.
 - El backend convierte esa URL a `postgresql+asyncpg://` y quita `sslmode` de la query para evitar el error `connect() got an unexpected keyword argument 'sslmode'`.
 - La decisión SSL se lee de la URL original: `sslmode=disable` desactiva SSL; `require`/`verify-ca`/`verify-full` lo activa; si no hay `sslmode`, se activa solo en producción con host externo.
-- SSL se pasa a asyncpg mediante `connect_args={"ssl": True|False}` cuando corresponde.
-- Para URL construida con `DB_*` en vez de `DATABASE_URL`, se puede usar `DB_SSLMODE`.
+- En producción externa se usa un `ssl.SSLContext` cifrado con `check_hostname=False` y `verify_mode=ssl.CERT_NONE`, porque el hostname interno de Render no coincide con el certificado público. No es SSL desactivado.
+- `app/core/db_url.py` centraliza URL, `connect_args`, pool y cierre de motores. La URL construida con `DB_*` usa `env_database_url()`.
+- Pools por defecto en producción: `DB_POOL_SIZE=2`, `DB_MAX_OVERFLOW=3`, `DB_POOL_TIMEOUT=10`, `DB_POOL_RECYCLE=180`, `pool_pre_ping=True`. En tests se usa `NullPool`.
+- `dispose_all_engines()` se ejecuta en el shutdown del Core. Las dependencias de sesión hacen `rollback()` antes de `close()`.
 - Alembic usa la misma URL pero con driver sincrónico `psycopg` (psycopg3).
 
 ## 6. Variables de entorno
@@ -50,16 +54,23 @@ Guía práctica para dejar `SIGA_SUIZA_2026` funcionando en Render. No incluye s
 Obligatorias en Render backend:
 
 - `DATABASE_URL` — Render la genera desde PostgreSQL.
+- `DB_SSLMODE=require`.
 - `SECRET_KEY` — generar un valor seguro en Render.
 - `PORT` — Render lo asigna automáticamente.
 - `ENVIRONMENT=production`.
 - `DEBUG=false`.
-- `FRONTEND_URL` o `CORS_ORIGINS` con el origen real del frontend.
+- `FRONTEND_URL=https://siga-frontend-pkpc.onrender.com` o `CORS_ORIGINS` con ese mismo origen.
+- `ENABLE_NATS=false`.
+
+Recomendadas en Render backend:
+
+- `SKIP_MIGRATIONS=true` — Alembic no se ejecuta en el arranque.
+- `SIGA_SINGLE_PROCESS=true` — evita múltiples Uvicorn en el plan Free.
+- `DB_POOL_SIZE=2`, `DB_MAX_OVERFLOW=3`, `DB_POOL_TIMEOUT=10`, `DB_POOL_RECYCLE=180`.
 
 Opcionales:
 
-- `ENABLE_NATS`, `NATS_URL`, `SKIP_MIGRATIONS`.
-- `PROGRAMAS_MODULE_URL`, `PLANES_MODULE_URL`.
+- `NATS_URL` — solo si `ENABLE_NATS=true`.
 - `VITE_API_URL`, `VITE_WS_URL` solo en el build del frontend.
 
 Solo desarrollo local:
@@ -71,9 +82,11 @@ Plantilla: `.env.example`. No subir valores secretos.
 
 ## 7. CORS
 
-- El Core usa `FRONTEND_URL` y `CORS_ORIGINS`, sin regex abierta.
+- El Core usa `FRONTEND_URL` y `CORS_ORIGINS`, sin regex abierta ni `*`.
+- En Render configurar `FRONTEND_URL=https://siga-frontend-pkpc.onrender.com`.
 - En desarrollo se mantienen `localhost:5173` y puertos locales habituales.
 - La autenticación es Bearer en `localStorage`, no cookies; por eso `allow_credentials=False`.
+- Si el navegador reporta `Disallowed CORS origin`, falta esa variable en el backend y se requiere restart/redeploy.
 
 ## 8. Health check
 
@@ -84,10 +97,10 @@ Plantilla: `.env.example`. No subir valores secretos.
 ## 9. Microservicios
 
 - No crear 7 Web Services públicos.
-- Los módulos corren dentro del mismo contenedor en `127.0.0.1`:
-  - 8001 usuarios, 8002 planes, 8005 programas, 8006 gestión académica, 8007 auditoría, 8008 evaluación, 8009 admisión.
+- Con `SIGA_SINGLE_PROCESS=true`, los módulos se cargan en proceso con `inprocess_modules.install()`; no se escuchan puertos internos.
+- Los antiguos puertos 8001/8002/8005/8006/8007/8008/8009 solo existen en la rama multi-proceso de desarrollo.
 - El único puerto público del backend es `$PORT`.
-- Las URLs internas se sobreescriben con `SIGA_MODULE_*_URL` en `start_railway.sh`.
+- `app/core/gateway/http_proxy.py` usa transporte ASGI interno y propaga `X-Request-ID` desde `request.state`.
 
 ## 10. NATS
 
@@ -129,9 +142,11 @@ No se creó `render.yaml`: la URL final del frontend y la decisión de NATS se d
 
 ## 14. Cómo configurar las variables de Render
 
-- En Web Service: `DATABASE_URL`, `SECRET_KEY`, `PORT`, `ENVIRONMENT`, `DEBUG`, `FRONTEND_URL`, `CORS_ORIGINS`, `ENABLE_NATS`, `NATS_URL`.
-- En Static Site: `VITE_API_URL`, `VITE_WS_URL`.
-- Cambiar `VITE_*` requiere rebuild/redeploy.
+- En Web Service: `DATABASE_URL`, `DB_SSLMODE=require`, `SECRET_KEY`, `PORT`, `ENVIRONMENT=production`, `DEBUG=false`, `FRONTEND_URL=https://siga-frontend-pkpc.onrender.com`, `CORS_ORIGINS=https://siga-frontend-pkpc.onrender.com`, `ENABLE_NATS=false`, `SKIP_MIGRATIONS=true`, `SIGA_SINGLE_PROCESS=true`.
+- En Static Site: `VITE_API_URL=https://siga-backend-pog5.onrender.com`; no configurar `VITE_WS_URL` salvo que exista un backend WebSocket real.
+- `VITE_API_URL` debe ser absoluta, HTTPS y sin barra final. El build falla si falta o es relativa.
+- Cambiar `VITE_*` requiere rebuild/redeploy; el asset actual desplegado sigue siendo `/assets/index-D9kB07sK.js` y no contiene el código corregido.
+- Nunca pegar `DATABASE_URL` ni `SECRET_KEY` en el repo ni en logs.
 
 ## 15. Cómo conectar PostgreSQL
 
@@ -150,17 +165,58 @@ No se creó `render.yaml`: la URL final del frontend y la decisión de NATS se d
 ## 17. Cómo comprobar que frontend y backend están conectados
 
 1. Abrir el Static Site.
-2. Hacer login; la petición debe ir a `VITE_API_URL/auth/login`.
+2. Hacer login; la petición debe ser `POST https://siga-backend-pog5.onrender.com/auth/login?email=...&password=...` con query params, no JSON body ni form-data.
 3. Verificar que `/core/status` muestre `healthy: 7`.
 4. Probar una boleta pública con `?recibo=`; depende de `VITE_API_URL`.
 5. Revisar la consola del navegador por errores CORS o mixed content.
 
+Comprobaciones HTTP equivalentes:
+
+```powershell
+curl.exe -i "https://siga-backend-pog5.onrender.com/health"
+curl.exe -i "https://siga-backend-pog5.onrender.com/core/status"
+curl.exe -i -X POST "https://siga-backend-pog5.onrender.com/auth/login?email=USUARIO_CODIFICADO&password=PASSWORD_CODIFICADO"
+curl.exe -i -X OPTIONS "https://siga-backend-pog5.onrender.com/auth/login" -H "Origin: https://siga-frontend-pkpc.onrender.com" -H "Access-Control-Request-Method: POST"
+curl.exe -i -X POST "https://siga-frontend-pkpc.onrender.com/auth/login?email=USUARIO_CODIFICADO&password=PASSWORD_CODIFICADO"
+```
+
+Resultado esperado:
+
+- `/health` y `/core/status`: `200`.
+- `POST /auth/login` en el backend: `200` con `{ access_token, token_type, user, permissions }`.
+- `OPTIONS /auth/login` en el backend con el origen real: `200` con `Access-Control-Allow-Origin`.
+- `POST /auth/login` en el frontend: no debe usarse; si devuelve `405` significa que el build no inyectó `VITE_API_URL`.
+
 ## 18. Errores comunes y solución
 
 - `connect() got an unexpected keyword argument 'sslmode'`: la URL llegó con `sslmode` a asyncpg. Usar `DATABASE_URL` y el helper `app/core/db_url.py`; nunca agregar `sslmode` a `connect_args`.
-- HTTP 405: revisar que el frontend llame al método correcto (`GET`/`POST`) y a la URL del backend, no al dominio estático.
-- Frontend sin conexión: revisar `VITE_API_URL`, CORS y que la URL sea HTTPS.
+- HTTP 405 en login: confirmar que sea `POST /auth/login` con query params. Si el 405 viene del dominio frontend, el bundle tiene `VITE_API_URL` vacía o es el asset antiguo; requiere rebuild con la variable.
+- `Disallowed CORS origin`: configurar `FRONTEND_URL` o `CORS_ORIGINS` en el backend y reiniciar Render.
+- `SSL error: unexpected EOF while reading` o `Connection reset by peer`: revisar pools, OOM/restarts y `SIGA_SINGLE_PROCESS=true`. No desactivar `DB_SSLMODE=require`.
+- Frontend sin conexión: revisar `VITE_API_URL`, CORS y que la URL sea HTTPS. No usar fallback relativo en producción.
 - `No module named psycopg2`: Alembic usa psycopg3; no instalar psycopg2 ni usar URLs `+psycopg2`.
-- Módulo 8006 sin responder: revisar `SIGA_MODULE_GESTION_ACADEMICA_URL` y los health checks internos.
+- Módulo 8006 sin responder: en modo single-process no existen puertos internos; revisar `/core/status` y los errores de importación del módulo.
 - Problemas de puerto: Render asigna `$PORT`; no hardcodear 8000 en producción.
 - Config vieja de Railway/Vercel: se conserva como histórico; Render usa `Dockerfile` raíz y `start_railway.sh`.
+
+## 19. Resultado de la auditoría final
+
+- El frontend actual usa `import.meta.env.VITE_API_URL` y no tiene fallback hardcodeado en el código fuente.
+- El bundle desplegado en el momento de la auditoría era viejo (`/assets/index-D9kB07sK.js`) y todavía construía la URL con `base || "https://siga-backend-pog5.onrender.com"`; por eso el diagnóstico remoto parecía contradictorio.
+- El backend ya respondió `200` a `POST /auth/login` con admin; el endpoint y la contraseña no están rotos.
+- `GET /auth/login` devuelve `405` con `allow: POST`; es comportamiento correcto del endpoint.
+- `POST` al dominio frontend devuelve `405` porque el Static Site sirve solo la SPA; esa no es la URL de login.
+- `OPTIONS` devolvió `400 Disallowed CORS origin`; se corrige con `FRONTEND_URL`/`CORS_ORIGINS`, no con `*`.
+- NATS no interviene en login; `ENABLE_NATS=false` es suficiente para HTTP.
+- El riesgo real de DB en Render Free era la combinación de muchos pools y posible multi-proceso/OOM, no una credencial SSL inválida.
+- No se hicieron cambios de esquema, tablas, credenciales, endpoints ni lógica de negocio; solo comunicación, configuración, pools y cierre limpio.
+
+Validaciones ejecutadas sobre el árbol corregido:
+
+- `python -m compileall -q app modules` en `siga_backend`: OK.
+- `npm run build` con `VITE_API_URL=https://siga-backend-pog5.onrender.com`: OK; el bundle contiene la URL del backend, no contiene `__SIGA_API_BASE__` ni el patrón del bundle viejo `b=y(void 0)`.
+- `npm run build` sin `VITE_API_URL`: falla con `VITE_API_URL debe ser HTTPS en el build de producción de Render`.
+- `npm run lint`: falla con 48 problemas preexistentes; ninguno corresponde a `client.jsx` ni `vite.config.js`.
+- `python -m pytest -q` contra `siga_test`: `30 passed, 96 skipped`.
+- Checks remotos actuales: `/health=200`, `/core/status=200`, `OPTIONS /auth/login` sin CORS configurado en Render=`400`, `POST /auth/login` al Static Site=`405`.
+- `docker build`: bloqueado porque Docker Desktop no tiene el daemon Linux disponible en este equipo.

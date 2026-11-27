@@ -6,6 +6,7 @@ from typing import Optional
 from sqlalchemy.engine import URL, make_url
 
 _LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1", "host.docker.internal", "postgres", "siga-core"}
+_ENGINE_REGISTRY = []
 
 
 def is_production() -> bool:
@@ -104,3 +105,43 @@ def async_connect_args(url: Optional[str] = None) -> dict:
             return {"ssl": render_internal_tls_context()}
         return {}
     return {}
+
+
+def env_database_url() -> str:
+    return build_async_database_url(
+        os.getenv("DATABASE_URL") or os.getenv("DB_URL"),
+        user=os.getenv("DB_USER", "postgres"),
+        password=os.getenv("DB_PASSWORD"),
+        host=os.getenv("DB_HOST", "localhost"),
+        port=os.getenv("DB_PORT", "5432"),
+        database=os.getenv("DB_NAME", "siga_suiza_2026"),
+    )
+
+
+def async_engine_kwargs(url: Optional[str] = None, poolclass=None, echo: Optional[bool] = None) -> dict:
+    options = {
+        "echo": not is_production() if echo is None else echo,
+        "connect_args": async_connect_args(url),
+    }
+    if poolclass is not None:
+        options["poolclass"] = poolclass
+        return options
+    options.update(
+        pool_size=int(os.getenv("DB_POOL_SIZE", "2")),
+        max_overflow=int(os.getenv("DB_MAX_OVERFLOW", "3")),
+        pool_timeout=int(os.getenv("DB_POOL_TIMEOUT", "10")),
+        pool_recycle=int(os.getenv("DB_POOL_RECYCLE", "180")),
+        pool_pre_ping=True,
+    )
+    return options
+
+
+def register_engine(engine):
+    if all(registered is not engine for registered in _ENGINE_REGISTRY):
+        _ENGINE_REGISTRY.append(engine)
+    return engine
+
+
+async def dispose_all_engines():
+    for engine in list(_ENGINE_REGISTRY):
+        await engine.dispose()

@@ -328,7 +328,7 @@ class HTTPGateway:
             headers["X-Real-IP"] = request.client.host
         
         headers["X-Module-Target"] = module_name
-        headers["X-Request-ID"] = request.headers.get("X-Request-ID", "")
+        headers["X-Request-ID"] = request.headers.get("X-Request-ID") or getattr(request.state, "request_id", "")
         headers["X-Gateway-Version"] = "2.0.0"  # Versión con resiliencia
         
         # Agregar contexto de usuario para módulos (si está autenticado)
